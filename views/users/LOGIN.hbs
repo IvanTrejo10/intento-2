@@ -1,0 +1,102 @@
+// Import necessary modules
+import express from 'express';
+import passport from 'passport';
+import LocalStrategy from 'passport-local';
+import cookieParser from 'cookie-parser';
+import session from 'express-session';
+import bcrypt from 'bcrypt';
+import User from '../domains/user/user.model';
+import log from '../config/winston';
+
+// Initialize Express app
+const app = express();
+
+// Configure session management
+app.use(cookieParser());
+app.use(
+  session({
+    secret: 'your_secret_key',
+    resave: false,
+    saveUninitialized: false,
+  })
+);
+
+// Initialize Passport and session middleware
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Configure Local Strategy for user login
+passport.use(
+  new LocalStrategy(
+    { usernameField: 'mail' },
+    async (mail, password, done) => {
+      try {
+        const user = await User.findOne({ mail });
+
+        if (!user) {
+          log.info('Usuario no registrado');
+          return done(null, false, { message: 'Usuario no registrado' });
+        }
+
+        if (!user.emailConfirmationAt) {
+          log.info('Usuario no confirmado');
+          return done(
+            null,
+            false,
+            { message: 'Cuenta inactiva, favor de activarla.' }
+          );
+        }
+
+        if (!user.authenticateUser(password)) {
+          log.info('Password incorrecto');
+          return done(null, false, { message: 'Password incorrecto' });
+        }
+
+        return done(null, user);
+      } catch (error) {
+        log.error(`🚨 ${error.message}`);
+        return done(error, false);
+      }
+    }
+  )
+);
+
+// Serialize and deserialize user
+passport.serializeUser((user, done) => {
+  log.info('Serializando usuario');
+  done(null, user.id);
+});
+
+passport.deserializeUser(async (id, done) => {
+  try {
+    log.info('Deserializando usuario');
+    const user = await User.findById(id);
+    done(null, user);
+  } catch (error) {
+    log.error(`🚨 ${error.message}`);
+    done(error, null);
+  }
+});
+
+// Login route handler
+app.post('/login', passport.authenticate('local', {
+  successRedirect: '/project/showDashboard',
+  failureRedirect: '/user/login',
+  failureFlash: true,
+}));
+
+// User model method for password verification
+UserSchema.methods.authenticateUser = function (password) {
+  return bcrypt.compareSync(password, this.password);
+};
+
+// Example route for showing dashboard after successful login
+app.get('/project/showDashboard', (req, res) => {
+  res.send('Dashboard content here');
+});
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
